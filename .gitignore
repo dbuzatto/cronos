@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.env
+*.egg-info/
+dist/
+build/
+
+# PLY gera esses arquivos automaticamente ao compilar as tabelas do parser
+cronos/parsetab.py
+parser.out
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Ambiente virtual
+venv/
+.venv/
+
+# macOS
+.DS_Store
+
+# Arquivos gerados pela Cronos (saída do codegen)
+examples/*.py
