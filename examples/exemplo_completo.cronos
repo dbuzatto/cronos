@@ -1,0 +1,47 @@
+# Exemplo completo da Cronos DSL
+# Demonstra todos os recursos: EVERY, AT, IF com disk/cpu/memory e todos os comparadores
+
+# Backup incremental — só roda se disco acima de 70%
+job backup_incremental
+  EVERY 6h
+  IF disk > 70
+  RUN "rsync -av /dados /backup"
+
+# Alerta de CPU — dispara se uso for igual ou maior que 90%
+job alerta_cpu
+  EVERY 5m
+  IF cpu >= 90
+  RUN "echo '[ALERTA] CPU acima de 90%' >> /var/log/alertas.log"
+
+# Limpeza de temporários — todo dia de madrugada, sem condição
+job limpeza_diaria
+  AT 03:00
+  RUN "find /tmp -mtime +7 -delete"
+
+# Health check frequente — sem condição, verifica o serviço a cada 30 segundos
+job health_check
+  EVERY 30s
+  RUN "curl -sf http://localhost:8080/health || echo 'Servico offline'"
+
+# Coleta de métricas — só coleta se memória não estiver saturada
+job coleta_metricas
+  EVERY 1m
+  IF memory < 95
+  RUN "python3 /opt/scripts/coletar_metricas.py"
+
+# Relatório noturno — todo dia às 23:00
+job relatorio_noturno
+  AT 23:00
+  RUN "python3 /opt/scripts/gerar_relatorio.py"
+
+# Reinício preventivo — só se CPU acima de 85%
+job reinicio_preventivo
+  EVERY 1d
+  IF cpu >= 85
+  RUN "systemctl restart minha_app"
+
+# Verificação de espaço — alerta se disco ABAIXO de 10% (pouco espaço livre)
+job alerta_espaco
+  EVERY 10m
+  IF disk >= 90
+  RUN "echo 'DISCO CHEIO' | mail -s 'Alerta' admin@empresa.com"

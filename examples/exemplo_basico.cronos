@@ -1,0 +1,13 @@
+# Exemplo básico da Cronos DSL
+# Retirado diretamente do artigo — dois jobs clássicos
+
+# Backup incremental: só executa se o disco estiver com mais de 80% de uso
+job backup
+  EVERY 1h
+  IF disk > 80
+  RUN "tar -czf /tmp/backup.tar.gz /data"
+
+# Health check diário: sem condição, roda sempre às 08:00
+job health_check
+  AT 08:00
+  RUN "curl -f http://localhost/health"
