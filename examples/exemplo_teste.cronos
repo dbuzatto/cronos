@@ -1,0 +1,12 @@
+# Arquivo de teste — condições ajustadas pra disparar no ambiente local
+
+# Roda a cada 10s se memória estiver acima de 70% (deve disparar logo)
+job backup
+  EVERY 10s
+  IF memory > 70
+  RUN "echo '[backup] condicao satisfeita — memoria acima de 70%'"
+
+# Roda a cada 5s sem nenhuma condição — sempre executa
+job health_check
+  EVERY 5s
+  RUN "echo '[health_check] executando sempre'"
