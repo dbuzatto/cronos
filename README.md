@@ -1,6 +1,6 @@
 # Cronos — DSL para Orquestração de Tarefas Agendadas
 
-Cronos é uma linguagem de domínio específico (DSL) interpretada para orquestração de tarefas agendadas com suporte a condições baseadas em métricas do sistema. Um programa `.cronos` é compilado para um script Python executável.
+Cronos é uma linguagem de domínio específico (DSL) interpretada para orquestração de tarefas agendadas com suporte a condições baseadas em métricas do sistema. Um programa `.cronos` é lido, analisado e executado diretamente pelo interpretador.
 
 > Trabalho acadêmico — Engenharia de Computação, FHO – Fundação Herminio Ometto  
 > Diogo Buzatto (RA: 111809) · Lucas Ferreira (RA: 111519)
@@ -153,6 +153,52 @@ STRING          ::= '"' .* '"'
 
 ---
 
+## Análise Semântica
+
+Além da análise sintática, o parser executa cinco verificações semânticas antes de registrar os jobs. Quatro abortam a execução com erro; uma é apenas aviso.
+
+### 1. Unicidade de identificadores de job
+
+Dois jobs com o mesmo nome geram erro. A tabela de símbolos guarda a linha da primeira declaração e a referencia na mensagem.
+
+```
+Erro: Job 'backup' ja foi declarado na linha 1.
+```
+
+### 2. Validade do intervalo em `EVERY`
+
+O número em `EVERY <n><unidade>` precisa ser maior que zero. `EVERY 0h` seria um loop infinito imediato.
+
+```
+Erro: Intervalo de agendamento deve ser maior que zero. Encontrado: EVERY 0h
+```
+
+### 3. Validade do horário em `AT`
+
+O lexer aceita `[0-2][0-9]:[0-5][0-9]`, o que permite `24:30` ou `29:00`. O verificador semântico garante hora `00-23` e minuto `00-59`.
+
+```
+Erro: Horario '24:30' invalido. Horas devem estar entre 00 e 23.
+```
+
+### 4. Threshold de métricas no intervalo `[0, 100]`
+
+Como `disk`, `cpu` e `memory` são percentuais, valores fora de `0-100` são impossíveis na prática.
+
+```
+Erro: Threshold 150 fora do intervalo valido [0, 100] para a metrica 'cpu'.
+```
+
+### 5. Comando `RUN` não vazio
+
+`RUN ""` é sintaticamente válido mas provavelmente engano do usuário. O parser apenas avisa e segue.
+
+```
+Aviso: Job 'health_check' possui comando RUN vazio.
+```
+
+---
+
 ## Instalação
 
 ### Pré-requisitos
@@ -190,26 +236,13 @@ job backup
   RUN "tar -czf /tmp/backup.tar.gz /data"
 ```
 
-### 2. Compile para Python
+### 2. Execute direto
 
 ```bash
 python main.py meus_jobs.cronos
-# Saída: meus_jobs.py
 ```
 
-Ou especifique o arquivo de saída:
-
-```bash
-python main.py meus_jobs.cronos agendador.py
-```
-
-### 3. Execute o script gerado
-
-```bash
-python meus_jobs.py
-```
-
-O processo fica rodando em loop, verificando e executando os jobs conforme o agendamento.
+O interpretador faz o parse, registra os jobs no scheduler e fica em loop executando-os conforme o agendamento. Use `Ctrl+C` pra parar.
 
 ---
 
@@ -218,18 +251,16 @@ O processo fica rodando em loop, verificando e executando os jobs conforme o age
 ```bash
 # Exemplo básico (do artigo)
 python main.py examples/exemplo_basico.cronos
-python examples/exemplo_basico.py
 
 # Exemplo com todos os recursos
 python main.py examples/exemplo_completo.cronos
-python examples/exemplo_completo.py
 ```
 
 ---
 
 ## Arquitetura
 
-Cronos segue a arquitetura clássica de compiladores em três fases:
+Cronos é um interpretador direto — o parser, durante a análise sintática, acumula os jobs em uma lista (`lista_jobs`); depois `processa_jobs()` registra todos no `schedule` e `executa_loop()` mantém o processo vivo:
 
 ```
 arquivo.cronos
@@ -241,27 +272,20 @@ arquivo.cronos
        │ tokens
        ▼
 ┌─────────────┐
-│  parser.py  │  Análise sintática: tokens → AST (LALR(1) via PLY)
-└──────┬──────┘
-       │ AST
-       ▼
-┌─────────────┐
-│  codegen.py │  Geração de código: AST → script Python
-└──────┬──────┘
-       │
-       ▼
-   arquivo.py   ← script executável com schedule + psutil
+│  parser.py  │  Análise sintática (LALR(1) via PLY) +
+│             │  tabela de símbolos + acumula lista_jobs +
+│             │  processa_jobs() registra no scheduler +
+│             │  executa_loop() roda eternamente
+└─────────────┘
 ```
 
 ### Módulos
 
 | Arquivo | Responsabilidade |
 |---|---|
-| `cronos/ast_nodes.py` | Dataclasses que representam os nós da AST |
 | `cronos/lexer.py` | Analisador léxico (tokenizador) usando PLY lex |
-| `cronos/parser.py` | Analisador sintático LALR(1) usando PLY yacc |
-| `cronos/codegen.py` | Gerador de código Python a partir da AST |
-| `main.py` | CLI que orquestra o pipeline completo |
+| `cronos/parser.py` | Parser LALR(1) + tabela de símbolos + interpretação (registra e executa os jobs) |
+| `main.py` | CLI que lê o arquivo, dispara o parse e a execução |
 
 ---
 
@@ -274,7 +298,6 @@ python -m unittest discover tests/
 # Rodar um módulo específico
 python -m unittest tests/test_lexer.py
 python -m unittest tests/test_parser.py
-python -m unittest tests/test_codegen.py
 ```
 
 ### Cobertura dos testes
@@ -282,8 +305,7 @@ python -m unittest tests/test_codegen.py
 | Módulo | O que é testado |
 |---|---|
 | `test_lexer.py` | Palavras-chave, literais (DURATION, TIME, INTEGER, STRING), comparadores, comentários |
-| `test_parser.py` | AST gerada para jobs com/sem condição, todos os comparadores e métricas, múltiplos jobs |
-| `test_codegen.py` | Imports, loop principal, chamadas de schedule, funções geradas, condições com psutil |
+| `test_parser.py` | `lista_jobs` populada corretamente para jobs com/sem condição, todos os comparadores e métricas, múltiplos jobs, e as 5 verificações semânticas (duplicata, intervalo, horário, threshold, RUN vazio) |
 
 ---
 
@@ -291,21 +313,19 @@ python -m unittest tests/test_codegen.py
 
 ```
 cronos/
-├── main.py                    # CLI: entry point do compilador
+├── main.py                    # CLI: entry point do interpretador
 ├── requirements.txt           # Dependências (ply, schedule, psutil)
 ├── cronos/
 │   ├── __init__.py
-│   ├── ast_nodes.py           # Nós da árvore sintática abstrata
 │   ├── lexer.py               # Analisador léxico (PLY lex)
-│   ├── parser.py              # Analisador sintático (PLY yacc, LALR(1))
-│   └── codegen.py             # Gerador de código Python
+│   └── parser.py              # Parser (PLY yacc, LALR(1)) + interpretador
 ├── examples/
 │   ├── exemplo_basico.cronos  # Exemplo do artigo
-│   └── exemplo_completo.cronos# Todos os recursos da linguagem
+│   ├── exemplo_completo.cronos# Todos os recursos da linguagem
+│   └── exemplo_teste.cronos   # Teste rápido com intervalo curto
 └── tests/
     ├── test_lexer.py
-    ├── test_parser.py
-    └── test_codegen.py
+    └── test_parser.py
 ```
 
 ---
@@ -315,8 +335,8 @@ cronos/
 | Biblioteca | Versão | Uso |
 |---|---|---|
 | [PLY](https://github.com/dabeaz/ply) | 3.11 | Lexer e parser (lex + yacc) |
-| [schedule](https://github.com/dbader/schedule) | 1.2.2 | Agendamento no script gerado |
-| [psutil](https://github.com/giampaolo/psutil) | 6.1.0 | Coleta de métricas no script gerado |
+| [schedule](https://github.com/dbader/schedule) | 1.2.2 | Agendamento dos jobs em runtime |
+| [psutil](https://github.com/giampaolo/psutil) | 6.1.0 | Coleta de métricas em runtime |
 
 ---
 
