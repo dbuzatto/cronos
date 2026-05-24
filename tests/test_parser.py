@@ -1,145 +1,124 @@
-"""
-test_parser.py - Testes unitários do analisador sintático
-
-Verifica se o parser constrói a AST correta pra diferentes programas Cronos.
-Roda com: python -m unittest tests/test_parser.py
-"""
-
 import unittest
 from cronos.lexer import build_lexer
-from cronos.parser import build_parser
-from cronos.ast_nodes import (
-    Program, JobDecl,
-    ScheduleEvery, ScheduleAt,
-    Condition, RunClause,
-)
+from cronos.parser import build_parser, lista_jobs
 
 
 def parse(text):
-    """Helper: faz o parse completo de um texto e retorna a AST."""
     lexer = build_lexer()
     parser = build_parser()
-    return parser.parse(text, lexer=lexer)
+    parser.parse(text, lexer=lexer)
+    return list(lista_jobs)
 
 
 class TestParserJobSimples(unittest.TestCase):
-    """Testa parsing de jobs básicos sem condição."""
-
     def test_job_every_sem_condicao(self):
         src = 'job backup\n  EVERY 1h\n  RUN "tar -czf /tmp/bkp.tar.gz /data"'
-        ast = parse(src)
-
-        self.assertIsInstance(ast, Program)
-        self.assertEqual(len(ast.jobs), 1)
-
-        job = ast.jobs[0]
-        self.assertIsInstance(job, JobDecl)
-        self.assertEqual(job.name, 'backup')
-        self.assertIsNone(job.condition)
+        jobs = parse(src)
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(jobs[0]['nome'], 'backup')
+        self.assertIsNone(jobs[0]['condicao'])
 
     def test_agendamento_every_horas(self):
-        src = 'job x\n  EVERY 1h\n  RUN "echo ok"'
-        job = parse(src).jobs[0]
-        self.assertIsInstance(job.schedule, ScheduleEvery)
-        self.assertEqual(job.schedule.amount, 1)
-        self.assertEqual(job.schedule.unit, 'h')
+        job = parse('job x\n  EVERY 1h\n  RUN "echo ok"')[0]
+        self.assertEqual(job['agenda'], ('every', 1, 'h'))
 
     def test_agendamento_every_minutos(self):
-        src = 'job x\n  EVERY 30m\n  RUN "echo ok"'
-        job = parse(src).jobs[0]
-        self.assertEqual(job.schedule.amount, 30)
-        self.assertEqual(job.schedule.unit, 'm')
+        job = parse('job x\n  EVERY 30m\n  RUN "echo ok"')[0]
+        self.assertEqual(job['agenda'], ('every', 30, 'm'))
 
     def test_agendamento_at(self):
-        src = 'job health_check\n  AT 08:00\n  RUN "curl -f http://localhost/health"'
-        job = parse(src).jobs[0]
-        self.assertIsInstance(job.schedule, ScheduleAt)
-        self.assertEqual(job.schedule.time, '08:00')
+        job = parse('job health_check\n  AT 08:00\n  RUN "curl -f http://localhost/health"')[0]
+        self.assertEqual(job['agenda'], ('at', '08:00'))
 
     def test_run_command(self):
-        src = 'job x\n  EVERY 5m\n  RUN "ls -la"'
-        job = parse(src).jobs[0]
-        self.assertIsInstance(job.run, RunClause)
-        self.assertEqual(job.run.command, 'ls -la')
+        job = parse('job x\n  EVERY 5m\n  RUN "ls -la"')[0]
+        self.assertEqual(job['comando'], 'ls -la')
 
 
 class TestParserCondicao(unittest.TestCase):
-    """Testa parsing da cláusula IF com métricas e comparadores."""
-
     def _parse_condicao(self, metrica, op, val):
         src = f'job teste\n  EVERY 1m\n  IF {metrica} {op} {val}\n  RUN "echo ok"'
-        ast = parse(src)
-        return ast.jobs[0].condition
+        return parse(src)[0]['condicao']
 
     def test_condicao_presente(self):
-        src = 'job limpar\n  EVERY 30m\n  IF disk > 80\n  RUN "rm -rf /tmp/old"'
-        job = parse(src).jobs[0]
-        self.assertIsNotNone(job.condition)
-        self.assertIsInstance(job.condition, Condition)
+        job = parse('job limpar\n  EVERY 30m\n  IF disk > 80\n  RUN "rm -rf /tmp/old"')[0]
+        self.assertIsNotNone(job['condicao'])
 
     def test_metrica_disk(self):
-        cond = self._parse_condicao('disk', '>', 80)
-        self.assertEqual(cond.metric, 'disk')
+        self.assertEqual(self._parse_condicao('disk', '>', 80)[0], 'disk')
 
     def test_metrica_cpu(self):
-        cond = self._parse_condicao('cpu', '>', 90)
-        self.assertEqual(cond.metric, 'cpu')
+        self.assertEqual(self._parse_condicao('cpu', '>', 90)[0], 'cpu')
 
     def test_metrica_memory(self):
-        cond = self._parse_condicao('memory', '<', 95)
-        self.assertEqual(cond.metric, 'memory')
+        self.assertEqual(self._parse_condicao('memory', '<', 95)[0], 'memory')
 
     def test_comparador_gt(self):
-        cond = self._parse_condicao('cpu', '>', 90)
-        self.assertEqual(cond.comparator, '>')
+        self.assertEqual(self._parse_condicao('cpu', '>', 90)[1], '>')
 
     def test_comparador_lt(self):
-        cond = self._parse_condicao('memory', '<', 50)
-        self.assertEqual(cond.comparator, '<')
+        self.assertEqual(self._parse_condicao('memory', '<', 50)[1], '<')
 
     def test_comparador_gte(self):
-        cond = self._parse_condicao('disk', '>=', 75)
-        self.assertEqual(cond.comparator, '>=')
+        self.assertEqual(self._parse_condicao('disk', '>=', 75)[1], '>=')
 
     def test_comparador_lte(self):
-        cond = self._parse_condicao('cpu', '<=', 20)
-        self.assertEqual(cond.comparator, '<=')
+        self.assertEqual(self._parse_condicao('cpu', '<=', 20)[1], '<=')
 
     def test_comparador_eq(self):
-        cond = self._parse_condicao('memory', '==', 100)
-        self.assertEqual(cond.comparator, '==')
+        self.assertEqual(self._parse_condicao('memory', '==', 100)[1], '==')
 
     def test_valor_condicao(self):
-        cond = self._parse_condicao('disk', '>', 85)
-        self.assertEqual(cond.value, 85)
+        self.assertEqual(self._parse_condicao('disk', '>', 85)[2], 85)
 
 
 class TestParserMultiplosJobs(unittest.TestCase):
-    """Testa parsing de arquivos com mais de um job declarado."""
-
     def test_dois_jobs(self):
-        src = (
-            'job backup\n  EVERY 1h\n  RUN "echo backup"\n'
-            'job health_check\n  AT 08:00\n  RUN "echo health"\n'
-        )
-        ast = parse(src)
-        self.assertEqual(len(ast.jobs), 2)
-        self.assertEqual(ast.jobs[0].name, 'backup')
-        self.assertEqual(ast.jobs[1].name, 'health_check')
+        src = ('job backup\n  EVERY 1h\n  RUN "echo backup"\n'
+               'job health_check\n  AT 08:00\n  RUN "echo health"\n')
+        jobs = parse(src)
+        self.assertEqual(len(jobs), 2)
+        self.assertEqual(jobs[0]['nome'], 'backup')
+        self.assertEqual(jobs[1]['nome'], 'health_check')
 
     def test_tres_jobs_misturados(self):
-        src = (
-            'job a\n  EVERY 1h\n  RUN "echo a"\n'
-            'job b\n  EVERY 5m\n  IF cpu > 80\n  RUN "echo b"\n'
-            'job c\n  AT 23:00\n  RUN "echo c"\n'
-        )
-        ast = parse(src)
-        self.assertEqual(len(ast.jobs), 3)
+        src = ('job a\n  EVERY 1h\n  RUN "echo a"\n'
+               'job b\n  EVERY 5m\n  IF cpu > 80\n  RUN "echo b"\n'
+               'job c\n  AT 23:00\n  RUN "echo c"\n')
+        jobs = parse(src)
+        self.assertEqual(len(jobs), 3)
+        self.assertIsNone(jobs[0]['condicao'])
+        self.assertIsNotNone(jobs[1]['condicao'])
+        self.assertIsNone(jobs[2]['condicao'])
 
-        # Job b tem condição, os outros não
-        self.assertIsNone(ast.jobs[0].condition)
-        self.assertIsNotNone(ast.jobs[1].condition)
-        self.assertIsNone(ast.jobs[2].condition)
+
+class TestSemantica(unittest.TestCase):
+    def test_job_duplicado_aborta(self):
+        src = 'job backup\n  EVERY 1h\n  RUN "x"\njob backup\n  AT 08:00\n  RUN "y"'
+        with self.assertRaises(SystemExit):
+            parse(src)
+
+    def test_intervalo_zero_aborta(self):
+        with self.assertRaises(SystemExit):
+            parse('job x\n  EVERY 0h\n  RUN "echo"')
+
+    def test_horario_hora_invalida_aborta(self):
+        with self.assertRaises(SystemExit):
+            parse('job x\n  AT 24:30\n  RUN "echo"')
+
+    def test_threshold_acima_de_100_aborta(self):
+        with self.assertRaises(SystemExit):
+            parse('job x\n  EVERY 1m\n  IF cpu > 150\n  RUN "echo"')
+
+    def test_threshold_no_limite_passa(self):
+        jobs = parse('job x\n  EVERY 1m\n  IF cpu > 100\n  RUN "echo"')
+        self.assertEqual(len(jobs), 1)
+
+    def test_run_vazio_emite_aviso(self):
+        # Aviso não aborta — job é registrado normalmente
+        jobs = parse('job health_check\n  EVERY 1m\n  RUN ""')
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(jobs[0]['comando'], '')
 
 
 if __name__ == '__main__':
